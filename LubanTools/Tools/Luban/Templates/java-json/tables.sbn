@@ -1,0 +1,51 @@
+{{~if __namespace != ''~}}
+package {{__namespace}};
+{{~end~}}
+
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+{{~
+func get_table_inner_name
+    ret '_' + ($0 | string.downcase)
+end
+~}}
+{{~
+func get_table_json_name
+    ret '_' + ($0 | string.downcase) + '_json'
+end
+~}}
+
+public final class {{__name}}
+{
+    public  interface  IJsonLoader {
+        JsonElement load(String file) throws java.io.IOException;
+    }
+
+    ConcurrentMap<String, String> CONFIG_JSON_CACHE = new ConcurrentHashMap<>();
+
+    {{~for table in __tables
+        inner_name = get_table_inner_name table.name
+     ~}}
+{{~if table.comment != '' ~}}
+    /**
+     * {{escape_comment table.comment}}
+     */
+{{~end~}}
+    private {{table.full_name_with_top_module}} {{inner_name}};
+    public {{table.full_name_with_top_module}} get{{table.name}}() { return {{inner_name}}; }
+    public void set{{table.name}}(String cfgJson) { {{inner_name}} = new {{table.full_name_with_top_module}}(new Gson().fromJson(cfgJson, JsonElement.class));CONFIG_JSON_CACHE.put("{{table.name}}",cfgJson); }
+    public String get{{table.name}}Json() { return CONFIG_JSON_CACHE.get("{{table.name}}");}
+    {{~end~}}
+
+    public {{__name}}(IJsonLoader loader) throws java.io.IOException {
+        {{~for table in __tables
+            inner_name = get_table_inner_name table.name
+        ~}}
+        JsonElement {{table.name}}Json = loader.load("{{table.output_data_file}}");
+        CONFIG_JSON_CACHE.put("{{table.name}}", new Gson().toJson({{table.name}}Json));
+        {{inner_name}} = new {{table.full_name_with_top_module}}({{table.name}}Json);
+        {{~end~}}
+    }
+}

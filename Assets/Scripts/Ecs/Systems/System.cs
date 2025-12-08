@@ -30,29 +30,80 @@ namespace GameFramework.ECS.Systems
         }
     }
 
-    // 输入系统
-    [UpdateInGroup(typeof(GameplaySystemGroup))]
-    [UpdateBefore(typeof(MoveSystem))]
-    public partial class InputSystem : SystemBase
+    // ======================================================================================
+    // 1. 输入同步系统 (主线程运行)
+    // 职责：仅负责从 InputManager 搬运数据到 ECS World，不做任何游戏逻辑。
+    // ======================================================================================
+    [UpdateInGroup(typeof(InitializationSystemGroup))] // 在游戏逻辑开始前尽早更新
+    public partial class InputSyncSystem : SystemBase
     {
+        protected override void OnCreate()
+        {
+            // 确保 World 中有一个 GlobalInputComponent 单例
+            // 这样我们在 Burst 系统中就可以随时读取它
+            EntityManager.CreateSingleton<GlobalInputComponent>();
+        }
+
         protected override void OnUpdate()
         {
+            // 这里的 InputManager.Instance 是外部单例，必须在主线程访问
             var inputData = InputManager.Instance.GetInputData();
 
-            Entities
-                .WithAll<PlayerTag>()
-                .ForEach((ref MoveComponent move, ref InputComponent input) =>
-                {
-                    input.Move = inputData.Move;
-                    input.Fire = inputData.Fire;
-                    input.Jump = inputData.Jump;
-
-                    move.Direction = new float3(input.Move.x, 0, input.Move.y);
-                }).Run();
+            // 将数据写入 ECS 单例
+            SystemAPI.SetSingleton(new GlobalInputComponent
+            {
+                Move = inputData.Move,
+                Fire = inputData.Fire,
+                Jump = inputData.Jump
+            });
         }
     }
 
-    // 伤害处理系统
+    // ======================================================================================
+    // 2. 玩家输入处理系统 (Burst 编译，高性能)
+    // 职责：读取全局输入，并行处理所有玩家实体的状态。
+    // ======================================================================================
+    [BurstCompile]
+    [UpdateInGroup(typeof(GameplaySystemGroup))]
+    [UpdateBefore(typeof(MoveSystem))] // 确保在移动计算之前应用输入
+    public partial struct PlayerInputSystem : ISystem
+    {
+        [BurstCompile]
+        public void OnUpdate(ref SystemState state)
+        {
+            // 获取全局输入 (这是值拷贝，非常快)
+            var globalInput = SystemAPI.GetSingleton<GlobalInputComponent>();
+
+            // 使用 Job 方式并行处理所有带 PlayerTag 的实体
+            // 这在移动端上有极高的性能优势
+            new ApplyInputJob
+            {
+                Input = globalInput
+            }.ScheduleParallel();
+        }
+
+        [BurstCompile]
+        partial struct ApplyInputJob : IJobEntity
+        {
+            public GlobalInputComponent Input;
+
+            // 只需要读写 MoveComponent 和 InputComponent，并且只针对 PlayerTag
+            void Execute(ref MoveComponent move, ref InputComponent inputComponent, in PlayerTag tag)
+            {
+                // 1. 更新组件状态
+                inputComponent.Move = Input.Move;
+                inputComponent.Fire = Input.Fire;
+                inputComponent.Jump = Input.Jump;
+
+                // 2. 将输入转换为移动方向 (逻辑部分)
+                move.Direction = new float3(Input.Move.x, 0, Input.Move.y);
+            }
+        }
+    }
+
+    // ======================================================================================
+    // 3. 伤害处理系统 (优化版 - 使用 ECB 单例)
+    // ======================================================================================
     [BurstCompile]
     [UpdateInGroup(typeof(GameplaySystemGroup))]
     public partial struct DamageSystem : ISystem
@@ -60,30 +111,43 @@ namespace GameFramework.ECS.Systems
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            var ecb = new EntityCommandBuffer(Unity.Collections.Allocator.Temp);
+            // 关键修改：获取系统提供的 EndSimulation ECB 单例
+            // 这允许我们在所有计算完成后，统一在帧末尾应用变更
+            var ecbSingleton = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>();
+            var ecb = ecbSingleton.CreateCommandBuffer(state.WorldUnmanaged);
 
-            foreach (var (damage, health, entity) in
-                SystemAPI.Query<RefRO<DamageComponent>, RefRW<HealthComponent>>()
-                    .WithEntityAccess())
+            // 使用 ScheduleParallel 并行处理所有伤害逻辑
+            new ApplyDamageJob
             {
-                health.ValueRW.Current -= damage.ValueRO.Amount;
+                Ecb = ecb.AsParallelWriter() // 并行写入器
+            }.ScheduleParallel();
+        }
 
-                // 移除伤害组件
-                ecb.RemoveComponent<DamageComponent>(entity);
+        [BurstCompile]
+        partial struct ApplyDamageJob : IJobEntity
+        {
+            public EntityCommandBuffer.ParallelWriter Ecb;
 
-                // 如果死亡,添加销毁标签
-                if (health.ValueRO.IsDead)
+            // 这里我们需要 Entity ID 来记录命令 (entityInQueryIndex 用于多线程排序)
+            void Execute(Entity entity, [EntityIndexInQuery] int sortKey, ref HealthComponent health, in DamageComponent damage)
+            {
+                health.Current -= damage.Amount;
+
+                // 移除伤害组件 (不需要立即生效，帧末尾统一移除)
+                Ecb.RemoveComponent<DamageComponent>(sortKey, entity);
+
+                // 死亡判定
+                if (health.IsDead)
                 {
-                    ecb.AddComponent<DestroyTag>(entity);
+                    Ecb.AddComponent<DestroyTag>(sortKey, entity);
                 }
             }
-
-            ecb.Playback(state.EntityManager);
-            ecb.Dispose();
         }
     }
 
-    // 销毁系统
+    // ======================================================================================
+    // 4. 销毁系统 (优化版 - 使用 ECB 单例)
+    // ======================================================================================
     [BurstCompile]
     [UpdateInGroup(typeof(GameplaySystemGroup))]
     [UpdateAfter(typeof(DamageSystem))]
@@ -92,16 +156,24 @@ namespace GameFramework.ECS.Systems
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            var ecb = new EntityCommandBuffer(Unity.Collections.Allocator.Temp);
+            var ecbSingleton = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>();
+            var ecb = ecbSingleton.CreateCommandBuffer(state.WorldUnmanaged);
 
-            foreach (var (_, entity) in
-                SystemAPI.Query<RefRO<DestroyTag>>().WithEntityAccess())
+            new DestroyEntityJob
             {
-                ecb.DestroyEntity(entity);
-            }
+                Ecb = ecb.AsParallelWriter()
+            }.ScheduleParallel();
+        }
 
-            ecb.Playback(state.EntityManager);
-            ecb.Dispose();
+        [BurstCompile]
+        partial struct DestroyEntityJob : IJobEntity
+        {
+            public EntityCommandBuffer.ParallelWriter Ecb;
+
+            void Execute(Entity entity, [EntityIndexInQuery] int sortKey, in DestroyTag tag)
+            {
+                Ecb.DestroyEntity(sortKey, entity);
+            }
         }
     }
 

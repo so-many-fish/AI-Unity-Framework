@@ -1,59 +1,82 @@
+// 文件路径: Assets/Scripts/Framework/MainMenuPanel.cs
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using DG.Tweening;
+using GameFramework.Managers;
 
 namespace GameFramework.UI
 {
-    public class MainMenuPanel : Managers.UIPanel
+    public class MainMenuPanel : UIPanel
     {
-        [Header("Buttons")]
-        [SerializeField] private Button playButton;
-        [SerializeField] private Button settingsButton;
-        [SerializeField] private Button quitButton;
+        // === 自动绑定区域 ===
 
-        [Header("UI Elements")]
-        [SerializeField] private TextMeshProUGUI titleText;
-        [SerializeField] private Transform buttonContainer;
+        // 1. 按名称绑定：Prefab中必须有名为 "StartButton" 的节点
+        [UIBind]
+        private Button StartButton;
 
-        private void Start()
+        // 2. 指定路径绑定：当名字重复或层级很深时使用
+        [UIBind("Buttons/SettingsButton")]
+        private Button _settingsBtn;
+
+        [UIBind]
+        private Button QuitButton;
+
+        [UIBind]
+        private TextMeshProUGUI TitleText;
+
+        // ===================
+
+        // 替代 Start()，在此处添加事件监听
+        protected override void OnInit()
         {
-            playButton.onClick.AddListener(OnPlayClicked);
-            settingsButton.onClick.AddListener(OnSettingsClicked);
-            quitButton.onClick.AddListener(OnQuitClicked);
+            base.OnInit();
+
+            // 此时所有 [UIBind] 的字段都已被赋值
+            StartButton.onClick.AddListener(OnPlayClicked);
+            _settingsBtn.onClick.AddListener(OnSettingsClicked);
+            QuitButton.onClick.AddListener(OnQuitClicked);
+
+            TitleText.text = "My Game Title";
         }
 
         protected override void OnShow()
         {
             base.OnShow();
-            PlayShowAnimation();
+
+            // 播放进场动画
+            PlayIntroAnimation();
         }
 
-        private void PlayShowAnimation()
+        private void PlayIntroAnimation()
         {
-            titleText.transform.localScale = Vector3.zero;
-            titleText.transform.DOScale(1f, 0.5f).SetEase(Ease.OutBack);
+            // 重置状态
+            StartButton.transform.localScale = Vector3.zero;
+            _settingsBtn.transform.localScale = Vector3.zero;
+            QuitButton.transform.localScale = Vector3.zero;
 
-            var buttons = buttonContainer.GetComponentsInChildren<Button>();
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                var button = buttons[i];
-                button.transform.localScale = Vector3.zero;
-                button.transform.DOScale(1f, 0.3f)
-                    .SetDelay(0.2f + i * 0.1f)
-                    .SetEase(Ease.OutBack);
-            }
+            // 序列动画
+            Sequence seq = DOTween.Sequence();
+            seq.Append(TitleText.transform.DOPunchScale(Vector3.one * 0.2f, 0.5f));
+            seq.Append(StartButton.transform.DOScale(1f, 0.3f).SetEase(Ease.OutBack));
+            seq.Join(_settingsBtn.transform.DOScale(1f, 0.3f).SetDelay(0.1f).SetEase(Ease.OutBack));
+            seq.Join(QuitButton.transform.DOScale(1f, 0.3f).SetDelay(0.2f).SetEase(Ease.OutBack));
         }
 
         private async void OnPlayClicked()
         {
+            // 进入游戏场景
             await Managers.SceneManager.Instance.LoadSceneAsync("GameScene");
-            Core.GameStateManager.Instance.ChangeState(Core.GameState.Playing);
+            // 关闭自己
+            Close();
+            // 打开 HUD
+           // await Managers.UIManager.Instance.ShowPanelAsync<GameHUDPanel>("GameHUDPanel", Managers.UILayer.Normal);
         }
 
         private async void OnSettingsClicked()
         {
-            await Managers.UIManager.Instance.ShowPanel<SettingsPanel>("SettingsPanel");
+            // 叠加打开设置面板
+            //await Managers.UIManager.Instance.ShowPanelAsync<SettingsPanel>("SettingsPanel", Managers.UILayer.Popup);
         }
 
         private void OnQuitClicked()
@@ -63,142 +86,6 @@ namespace GameFramework.UI
 #else
             Application.Quit();
 #endif
-        }
-    }
-
-    public class GameHUDPanel : Managers.UIPanel
-    {
-        [Header("Player Info")]
-        [SerializeField] private Slider healthBar;
-        [SerializeField] private TextMeshProUGUI levelText;
-        [SerializeField] private Slider xpBar;
-        [SerializeField] private TextMeshProUGUI scoreText;
-
-        [Header("Controls")]
-        [SerializeField] private Button pauseButton;
-
-        private void Start()
-        {
-            pauseButton.onClick.AddListener(OnPauseClicked);
-
-            // 订阅事件
-            Events.EventManager.Instance.Subscribe<Events.LevelUpEvent>(OnLevelUp);
-            Events.EventManager.Instance.Subscribe<Events.ScoreChangedEvent>(OnScoreChanged);
-        }
-
-        private void OnDestroy()
-        {
-            Events.EventManager.Instance.Unsubscribe<Events.LevelUpEvent>(OnLevelUp);
-            Events.EventManager.Instance.Unsubscribe<Events.ScoreChangedEvent>(OnScoreChanged);
-        }
-
-        private void Update()
-        {
-            UpdatePlayerInfo();
-        }
-
-        private void UpdatePlayerInfo()
-        {
-            // 从ECS获取玩家数据
-            var world = Unity.Entities.World.DefaultGameObjectInjectionWorld;
-            if (world == null) return;
-
-            var entityManager = world.EntityManager;
-            var playerQuery = entityManager.CreateEntityQuery(
-                typeof(ECS.Components.PlayerTag),
-                typeof(ECS.Components.HealthComponent),
-                typeof(ECS.Components.ExperienceComponent)
-            );
-
-            if (playerQuery.CalculateEntityCount() == 0) return;
-
-            var playerEntity = playerQuery.GetSingletonEntity();
-            var health = entityManager.GetComponentData<ECS.Components.HealthComponent>(playerEntity);
-            var xp = entityManager.GetComponentData<ECS.Components.ExperienceComponent>(playerEntity);
-
-            healthBar.value = health.HealthPercentage;
-            levelText.text = $"Lv.{xp.Level}";
-            xpBar.value = (float)xp.CurrentXP / xp.RequiredXP;
-        }
-
-        private void OnLevelUp(Events.LevelUpEvent evt)
-        {
-            levelText.transform.DOPunchScale(Vector3.one * 0.3f, 0.5f);
-        }
-
-        private void OnScoreChanged(Events.ScoreChangedEvent evt)
-        {
-            scoreText.text = $"Score: {evt.NewScore}";
-            scoreText.transform.DOPunchScale(Vector3.one * 0.2f, 0.3f);
-        }
-
-        private void OnPauseClicked()
-        {
-            Core.GameStateManager.Instance.ChangeState(Core.GameState.Paused);
-        }
-    }
-
-    public class SettingsPanel : Managers.UIPanel
-    {
-        [SerializeField] private Slider masterVolumeSlider;
-        [SerializeField] private Slider musicVolumeSlider;
-        [SerializeField] private Slider sfxVolumeSlider;
-        [SerializeField] private Toggle fullscreenToggle;
-        [SerializeField] private TMP_Dropdown qualityDropdown;
-        [SerializeField] private Button closeButton;
-
-        private void Start()
-        {
-            LoadSettings();
-
-            masterVolumeSlider.onValueChanged.AddListener(OnMasterVolumeChanged);
-            musicVolumeSlider.onValueChanged.AddListener(OnMusicVolumeChanged);
-            sfxVolumeSlider.onValueChanged.AddListener(OnSFXVolumeChanged);
-            fullscreenToggle.onValueChanged.AddListener(OnFullscreenChanged);
-            qualityDropdown.onValueChanged.AddListener(OnQualityChanged);
-            closeButton.onClick.AddListener(OnCloseClicked);
-        }
-
-        private void LoadSettings()
-        {
-            var config = Core.ConfigManager.Instance.GameConfig;
-            masterVolumeSlider.value = config.masterVolume;
-            musicVolumeSlider.value = config.musicVolume;
-            sfxVolumeSlider.value = config.sfxVolume;
-
-            var platformConfig = config.GetCurrentPlatformConfig();
-            fullscreenToggle.isOn = platformConfig.fullscreen;
-            qualityDropdown.value = platformConfig.qualityLevel;
-        }
-
-        private void OnMasterVolumeChanged(float value)
-        {
-            Managers.AudioManager.Instance.SetMasterVolume(value);
-        }
-
-        private void OnMusicVolumeChanged(float value)
-        {
-            Managers.AudioManager.Instance.SetMusicVolume(value);
-        }
-
-        private void OnSFXVolumeChanged(float value)
-        {
-            // 保存设置
-        }
-
-        private void OnFullscreenChanged(bool isFullscreen)
-        {
-            Screen.fullScreen = isFullscreen;
-        }
-
-        private void OnQualityChanged(int qualityIndex)
-        {
-            QualitySettings.SetQualityLevel(qualityIndex);
-        }
-
-        private void OnCloseClicked()
-        {
-            Hide();
         }
     }
 }

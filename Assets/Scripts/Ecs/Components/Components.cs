@@ -72,4 +72,12 @@ namespace GameFramework.ECS.Components
         public int CurrentXP;
         public int RequiredXP;
     }
+
+    // 这是一个特殊的组件，整个世界只存一份，用于充当 InputManager 和 ECS 之间的桥梁
+    public struct GlobalInputComponent : IComponentData
+    {
+        public float2 Move;
+        public bool Fire;
+        public bool Jump;
+    }
 }

@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Root ClientVersion="0.0.0.93">
+  <FileVersion name="common_tbglobalconfig.bytes" nameWithoutExtension="common_tbglobalconfig" file="common_tbglobalconfig.bytes" hashCode="1015977411" size="1" extension=".bytes" />
+  <FileVersion name="error_tbcodeinfo.bytes" nameWithoutExtension="error_tbcodeinfo" file="error_tbcodeinfo.bytes" hashCode="1206425328" size="1" extension=".bytes" />
+  <FileVersion name="error_tberrorinfo.bytes" nameWithoutExtension="error_tberrorinfo" file="error_tberrorinfo.bytes" hashCode="1305182174" size="3" extension=".bytes" />
+  <FileVersion name="metaparty_tbcostume_config.bytes" nameWithoutExtension="metaparty_tbcostume_config" file="metaparty_tbcostume_config.bytes" hashCode="249285461" size="1" extension=".bytes" />
+  <FileVersion name="metaparty_tblanguage_config.bytes" nameWithoutExtension="metaparty_tblanguage_config" file="metaparty_tblanguage_config.bytes" hashCode="-720622714" size="1" extension=".bytes" />
+  <FileVersion name="metaparty_tbnpc_config.bytes" nameWithoutExtension="metaparty_tbnpc_config" file="metaparty_tbnpc_config.bytes" hashCode="1337231224" size="1" extension=".bytes" />
+  <FileVersion name="metaparty_tbscenes_config.bytes" nameWithoutExtension="metaparty_tbscenes_config" file="metaparty_tbscenes_config.bytes" hashCode="-621397494" size="3" extension=".bytes" />
+  <FileVersion name="metaparty_tbsounds_config.bytes" nameWithoutExtension="metaparty_tbsounds_config" file="metaparty_tbsounds_config.bytes" hashCode="-1490866684" size="1" extension=".bytes" />
+  <FileVersion name="metaparty_tbuiview_config.bytes" nameWithoutExtension="metaparty_tbuiview_config" file="metaparty_tbuiview_config.bytes" hashCode="-644907595" size="1" extension=".bytes" />
+</Root>
